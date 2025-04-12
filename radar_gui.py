@@ -8,7 +8,8 @@ import serial.tools.list_ports
 # Radar GUI setup
 root = tk.Tk()
 root.title("Radar System with Box Control")
-canvas = tk.Canvas(root, width=400, height=400, bg="black")
+# Increase canvas size to accommodate more information
+canvas = tk.Canvas(root, width=700, height=600, bg="black")
 canvas.pack()
 
 # Try to find available serial ports
@@ -27,8 +28,8 @@ else:
     print("No serial ports found")
 
 # Draw radar background (static, no need to redraw every time)
-CENTER_X, CENTER_Y = 200, 200
-RADIUS = 180
+CENTER_X, CENTER_Y = 300, 300  # Center point moved to accommodate larger screen
+RADIUS = 250  # Increased radar radius
 canvas.create_oval(CENTER_X - RADIUS, CENTER_Y - RADIUS, 
                    CENTER_X + RADIUS, CENTER_Y + RADIUS, outline="green", tags="background")
 
@@ -36,9 +37,29 @@ canvas.create_oval(CENTER_X - RADIUS, CENTER_Y - RADIUS,
 targets = []
 target_velocities = []  # Store velocity vectors for each target
 target_visibilities = []  # Track if targets are visible or not
+target_disappear_times = []  # Track when each target disappeared
+target_names = []  # Store names for each target
+target_types = []  # Store the type of each target (aircraft, ship, vehicle, unknown)
 locked_target_index = None  # Store the index of the locked target
 lock_time = None
 lock_lost_time = None  # Track when a lock was lost
+
+# Flag to indicate if initial targets have been created
+initial_targets_created = False
+# Number of initial targets to create
+INITIAL_TARGET_COUNT = 6
+
+# List of realistic target names for different types of aircraft, ships, and vehicles
+aircraft_names = ["Eagle-1", "Raptor-2", "Falcon-3", "Hawk-4", "Viper-5", "Hornet-6", "Condor-7", "Phoenix-8"]
+ship_names = ["Nimbus", "Poseidon", "Triton", "Kraken", "Tempest", "Nautilus", "Aegis", "Trident"]
+vehicle_names = ["Rover-1", "Chariot-2", "Nomad-3", "Voyager-4", "Pathfinder", "Sentinel", "Guardian", "Vanguard"]
+unknown_names = ["Unknown-A", "Unknown-B", "Unknown-C", "Unknown-D", "Unknown-E", "Unknown-F", "Unknown-G", "Unknown-H"]
+
+# Target type constants
+TARGET_AIRCRAFT = "aircraft"
+TARGET_SHIP = "ship"
+TARGET_VEHICLE = "vehicle"
+TARGET_UNKNOWN = "unknown"
 
 # Create a movable box
 box_size = 20
@@ -104,7 +125,8 @@ def handle_key(event):
             if min_distance < 50:
                 locked_target_index = closest_target_idx
                 lock_time = time.time()
-                print(f"Locked onto target at angle: {targets[locked_target_index][0]:.2f}°, distance: {targets[locked_target_index][1]:.2f} cm")
+                target_name = target_names[locked_target_index] if locked_target_index < len(target_names) else "Unknown"
+                print(f"Locked onto {target_name} at angle: {targets[locked_target_index][0]:.2f}°, distance: {targets[locked_target_index][1]:.2f} cm")
             else:
                 locked_target_index = None
                 print("No target within range")
@@ -114,42 +136,107 @@ def handle_key(event):
 # Bind the key press event
 root.bind("<Key>", handle_key)
 
+# Function to create initial targets
+def create_initial_targets():
+    global targets, target_velocities, target_visibilities, target_names, target_types, initial_targets_created
+    
+    # Create 2 aircraft (far targets)
+    for _ in range(2):
+        angle = random.uniform(0, 180)
+        distance = random.uniform(RADIUS * 0.7, RADIUS * 0.9)  # Far distance
+        targets.append((angle, distance))
+        # Slower velocity for aircraft (reduced by 50%)
+        target_velocities.append((random.uniform(-0.5, 0.5), random.uniform(-1, 1)))
+        target_visibilities.append(True)
+        target_disappear_times.append(None)  # No disappear time initially
+        target_names.append(random.choice(aircraft_names))
+        target_types.append(TARGET_AIRCRAFT)
+    
+    # Create 2 ships (medium distance)
+    for _ in range(2):
+        angle = random.uniform(0, 180)
+        distance = random.uniform(RADIUS * 0.4, RADIUS * 0.6)  # Medium distance
+        targets.append((angle, distance))
+        # Slower velocity for ships (reduced by 70%)
+        target_velocities.append((random.uniform(-0.3, 0.3), random.uniform(-0.6, 0.6)))
+        target_visibilities.append(True)
+        target_disappear_times.append(None)  # No disappear time initially
+        target_names.append(random.choice(ship_names))
+        target_types.append(TARGET_SHIP)
+    
+    # Create 2 vehicles (close targets)
+    for _ in range(2):
+        angle = random.uniform(0, 180)
+        distance = random.uniform(RADIUS * 0.1, RADIUS * 0.3)  # Close distance
+        targets.append((angle, distance))
+        # Slower velocity for vehicles (reduced by 80%)
+        target_velocities.append((random.uniform(-0.2, 0.2), random.uniform(-0.4, 0.4)))
+        target_visibilities.append(True)
+        target_disappear_times.append(None)  # No disappear time initially
+        target_names.append(random.choice(vehicle_names))
+        target_types.append(TARGET_VEHICLE)
+    
+    initial_targets_created = True
+    print(f"Created {len(targets)} initial targets")
+
 # Function to update the radar display
 def update_radar():
-    global targets, target_velocities, target_visibilities, locked_target_index, lock_lost_time
+    global targets, target_velocities, target_visibilities, locked_target_index, lock_lost_time, initial_targets_created
     
     canvas.delete("target")  # Clear previous targets only
     canvas.delete("info")    # Clear info text
     canvas.delete("lock_info")  # Clear lock information
 
+    # Create initial targets if they haven't been created yet
+    if not initial_targets_created:
+        create_initial_targets()
+    
     # Update existing target positions based on their velocities
     for i in range(len(targets)):
-        if i < len(target_velocities):  # Make sure we have velocity for this target
-            angle, distance = targets[i]
-            v_angle, v_distance = target_velocities[i]
+        # Ensure all arrays are properly initialized and have the same length
+        while len(target_velocities) <= i:
+            target_velocities.append((random.uniform(-0.3, 0.3), random.uniform(-0.6, 0.6)))
             
-            # Update angle and distance based on velocity
-            new_angle = (angle + v_angle) % 180
-            new_distance = distance + v_distance
-            
-            # Bounce off boundaries
-            if new_distance <= 0 or new_distance >= RADIUS:
-                target_velocities[i] = (v_angle, -v_distance)
-                new_distance = max(0, min(new_distance, RADIUS))
-            
-            # Update target position
-            targets[i] = (new_angle, new_distance)
-            
-            # Randomly toggle visibility (1% chance per update) but don't delete targets
-            if random.random() < 0.01:
-                target_visibilities[i] = not target_visibilities[i]
+        angle, distance = targets[i]
+        v_angle, v_distance = target_velocities[i]
+        
+        # Update angle and distance based on velocity
+        new_angle = (angle + v_angle) % 180
+        new_distance = distance + v_distance
+        
+        # Bounce off boundaries
+        if new_distance <= 0 or new_distance >= RADIUS:
+            target_velocities[i] = (v_angle, -v_distance)
+            new_distance = max(0, min(new_distance, RADIUS))
+        
+        # Update target position
+        targets[i] = (new_angle, new_distance)
+        
+        # Randomly toggle visibility (0.1% chance per update - 10x less frequent)
+        if random.random() < 0.001 and i < len(target_visibilities):
+            # If target is currently visible, make it disappear
+            if target_visibilities[i]:
+                target_visibilities[i] = False
+                if i < len(target_disappear_times):
+                    target_disappear_times[i] = time.time()  # Record when it disappeared
+                else:
+                    # Ensure array is properly sized
+                    while len(target_disappear_times) <= i:
+                        target_disappear_times.append(None)
+                    target_disappear_times[i] = time.time()
                 
                 # If this is the locked target and it disappeared, start counting lost time
-                if i == locked_target_index and not target_visibilities[i]:
-                    if lock_lost_time is None:
-                        lock_lost_time = time.time()
+                if i == locked_target_index and lock_lost_time is None:
+                    lock_lost_time = time.time()
+        
+        # Check if a disappeared target should reappear (after 5 seconds)
+        if i < len(target_visibilities) and i < len(target_disappear_times) and not target_visibilities[i] and target_disappear_times[i] is not None:
+            if time.time() - target_disappear_times[i] > 5:  # 5 seconds timeout
+                target_visibilities[i] = True
+                target_disappear_times[i] = None  # Reset disappear time
+                
                 # If this is the locked target and it reappeared, reset lost time
-                elif i == locked_target_index and target_visibilities[i]:
+                if i == locked_target_index:
                     lock_lost_time = None
 
     # Check if lock has been lost for too long (3 seconds)
@@ -158,65 +245,87 @@ def update_radar():
             print("Lock lost - target out of radar range for too long")
             locked_target_index = None
             lock_lost_time = None
-
-    if ser and ser.is_open:
-        try:
-            if ser.in_waiting > 0:
-                line = ser.readline().decode().strip()
-                
-                if "Sending data:" in line:
-                    # Extract just the numeric data after "Sending data:"
-                    line = line.split("Sending data:")[-1].strip()
-                
-                if "," in line:  # Ensure the data contains a comma separating angle and distance
-                    parts = line.split(",")
-                    if len(parts) >= 2:
-                        try:
-                            angle = float(parts[0])
-                            distance = float(parts[1])
-                            
-                            # Scale the distance to fit within the radar's range (up to RADIUS)
-                            if distance > RADIUS:
-                                distance = RADIUS  # Clip distance to the radar's radius for visibility
-                                
-                            # Only add new targets if we have fewer than MAX_TARGETS
-                            if len(targets) < 15:  # Increased max targets to 15
-                                targets.append((angle, distance))
-                                # Add a random velocity for this target
-                                target_velocities.append((random.uniform(-1, 1), random.uniform(-2, 2)))
-                                # Start as visible
-                                target_visibilities.append(True)
-                        except ValueError:
-                            print(f"Invalid data format: {line}")
-        except Exception as e:
-            print(f"Error reading serial: {e}")
-    else:
-        # If no serial connection, generate simulated data occasionally
-        if random.random() < 0.03 and len(targets) < 15:  # Only add if fewer than max targets
-            angle = random.uniform(0, 180)
-            distance = random.uniform(RADIUS * 0.3, RADIUS * 0.8)  # Start targets in middle area
-            targets.append((angle, distance))
-            # Add a random velocity for this target
-            target_velocities.append((random.uniform(-1, 1), random.uniform(-2, 2)))
-            # Start as visible
-            target_visibilities.append(True)
+            
+    # No new targets will be created - we only use the 6 initial targets
 
     # Draw all targets
     for i, (angle, distance) in enumerate(targets):
-        # Only draw visible targets
-        if i < len(target_visibilities) and target_visibilities[i]:
-            # Calculate x and y based on angle and distance
-            rad_angle = math.radians(angle)
-            x = CENTER_X + distance * math.cos(rad_angle)
-            y = CENTER_Y + distance * math.sin(rad_angle)
+        # Ensure all arrays are properly initialized and have the same length
+        while len(target_visibilities) <= i:
+            target_visibilities.append(True)
+        while len(target_disappear_times) <= i:
+            target_disappear_times.append(None)
+        while len(target_types) <= i:
+            target_types.append(TARGET_UNKNOWN)
+        while len(target_names) <= i:
+            target_names.append(f"Unknown-{i+1}")
+            
+        # Calculate x and y based on angle and distance for all targets
+        rad_angle = math.radians(angle)
+        x = CENTER_X + distance * math.cos(rad_angle)
+        y = CENTER_Y + distance * math.sin(rad_angle)
 
-            # Draw the radar target
+        # Get target type and name
+        target_type = target_types[i]
+        target_name = target_names[i]
+        
+        # Only draw visible targets on the radar
+        if target_visibilities[i]:
+            # Draw the radar target with different icons based on type
             if locked_target_index is not None and i == locked_target_index:
-                # Highlight the locked target
-                canvas.create_oval(x-8, y-8, x+8, y+8, outline="yellow", width=2, tags="target")
-                canvas.create_oval(x-5, y-5, x+5, y+5, fill="red", tags="target")
+                # Highlight the locked target with yellow outline
+                canvas.create_oval(x-10, y-10, x+10, y+10, outline="yellow", width=2, tags="target")
+                
+                # Draw different icons based on target type
+                if target_type == TARGET_AIRCRAFT:
+                    # Aircraft - triangle pointing up
+                    canvas.create_polygon(x, y-7, x-6, y+5, x+6, y+5, fill="red", outline="white", tags="target")
+                elif target_type == TARGET_SHIP:
+                    # Ship - diamond shape
+                    canvas.create_polygon(x, y-7, x+7, y, x, y+7, x-7, y, fill="blue", outline="white", tags="target")
+                elif target_type == TARGET_VEHICLE:
+                    # Vehicle - square
+                    canvas.create_rectangle(x-5, y-5, x+5, y+5, fill="green", outline="white", tags="target")
+                else:
+                    # Unknown - circle
+                    canvas.create_oval(x-5, y-5, x+5, y+5, fill="orange", tags="target")
+                    
+                # Show target name near the locked target with background for better visibility
+                text_bg = canvas.create_rectangle(x-60, y-25, x+60, y-10, fill="black", outline="yellow", tags="target")
+                canvas.create_text(x, y-17, text=target_name, fill="yellow", tags="target")
             else:
-                canvas.create_oval(x-5, y-5, x+5, y+5, fill="red", tags="target")
+                # Draw different icons based on target type (non-locked)
+                if target_type == TARGET_AIRCRAFT:
+                    # Aircraft - triangle pointing up
+                    canvas.create_polygon(x, y-5, x-5, y+3, x+5, y+3, fill="red", tags="target")
+                elif target_type == TARGET_SHIP:
+                    # Ship - diamond shape
+                    canvas.create_polygon(x, y-5, x+5, y, x, y+5, x-5, y, fill="blue", tags="target")
+                elif target_type == TARGET_VEHICLE:
+                    # Vehicle - square
+                    canvas.create_rectangle(x-4, y-4, x+4, y+4, fill="green", tags="target")
+                else:
+                    # Unknown - circle
+                    canvas.create_oval(x-5, y-5, x+5, y+5, fill="orange", tags="target")
+                
+                # Show name next to all targets with semi-transparent background
+                # Calculate position based on angle to prevent text from overlapping with radar edge
+                text_angle = angle
+                if 45 <= angle <= 135:  # Top half of radar
+                    text_y = y - 15
+                    text_x = x
+                elif angle < 45:  # Right side
+                    text_y = y
+                    text_x = x + 15
+                else:  # Left side
+                    text_y = y
+                    text_x = x - 15
+                
+                # Create background for text
+                name_width = len(target_name) * 4 + 10  # Approximate width based on text length
+                canvas.create_rectangle(text_x-name_width/2, text_y-8, text_x+name_width/2, text_y+8, 
+                                        fill="black", outline="", tags="target")
+                canvas.create_text(text_x, text_y, text=target_name, fill="cyan", tags="target")
 
     # Status info
     if ser and ser.is_open:
@@ -238,10 +347,11 @@ def update_radar():
                       fill="cyan", anchor="w", tags="info")
 
     # Target info to the right of the radar - ensure it fits on screen
-    target_info_x = 320  # Move it a bit more to the right
+    target_info_x = 570  # Move it more to the right for larger screen
     canvas.create_text(target_info_x, 10, text="Target Info", fill="white", anchor="w", tags="info")
     
     # Only show info for the 5 most recent targets to avoid overflow
+    # Only include targets that are currently visible
     visible_targets = [(i, target) for i, target in enumerate(targets) 
                       if i < len(target_visibilities) and target_visibilities[i]]
     
@@ -250,7 +360,13 @@ def update_radar():
     
     # Display only up to 5 targets
     for display_idx, (i, (angle, distance)) in enumerate(visible_targets[:5]):
-        target_text = f"T{i+1}: {angle:.0f}°, {distance:.0f}cm"
+        # Get target name and type or use defaults if not available
+        target_name = target_names[i] if i < len(target_names) else f"Unknown-{i+1}"
+        target_type = target_types[i] if i < len(target_types) else TARGET_UNKNOWN
+        
+        # Add icon symbol based on target type
+        type_symbol = "▲" if target_type == TARGET_AIRCRAFT else "◆" if target_type == TARGET_SHIP else "■" if target_type == TARGET_VEHICLE else "●"
+        target_text = f"{type_symbol} {target_name}: {angle:.0f}°, {distance:.0f}cm"
         # Highlight the locked target in the list
         text_color = "yellow" if i == locked_target_index else "green"
         canvas.create_text(target_info_x, 30 + display_idx * 20, 
@@ -280,8 +396,19 @@ def update_radar():
         lock_x = box_x + box_size // 2 + 10
         lock_y = box_y
         
+        # Get target name and type
+        target_name = target_names[locked_target_index] if locked_target_index < len(target_names) else "Unknown"
+        target_type = target_types[locked_target_index] if locked_target_index < len(target_types) else TARGET_UNKNOWN
+        
+        # Get type description
+        type_desc = "Aircraft" if target_type == TARGET_AIRCRAFT else "Ship" if target_type == TARGET_SHIP else "Vehicle" if target_type == TARGET_VEHICLE else "Unknown"
+        
         # Only draw the targeting line if the target is currently visible
         if locked_target_index < len(target_visibilities) and target_visibilities[locked_target_index]:
+            canvas.create_text(lock_x, lock_y - 45, text=f"TARGET: {target_name}", 
+                              fill="yellow", anchor="w", tags="lock_info")
+            canvas.create_text(lock_x, lock_y - 30, text=f"TYPE: {type_desc}", 
+                              fill="yellow", anchor="w", tags="lock_info")
             canvas.create_text(lock_x, lock_y - 15, text=f"LOCKED", 
                               fill="yellow", anchor="w", tags="lock_info")
             canvas.create_text(lock_x, lock_y, text=f"Alt: {altitude:.0f}m", 
@@ -304,8 +431,8 @@ def update_radar():
             canvas.create_text(lock_x, lock_y + 15, text=f"Reacquiring target", 
                               fill="orange", anchor="w", tags="lock_info")
         
-    # Refresh every 100ms (0.1 seconds)
-    root.after(100, update_radar)
+    # Refresh every 150ms (0.15 seconds) - slightly slower refresh rate for smoother movement
+    root.after(150, update_radar)
 
 # Start updating the radar
 update_radar()
